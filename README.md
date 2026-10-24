@@ -33,3 +33,13 @@ Si le système refuse le lancement ou si l'application s'ouvre sur le téléphon
 - Redémarrer le téléphone.
 - Certaines applications et certaines surcouches constructeur bloquent le lancement sur un écran secondaire.
 - L'adaptateur HDMI doit exposer un véritable écran secondaire, et non simplement un miroir de l'écran du téléphone. Le téléphone doit donc supporter la sortie vidéo USB-C DisplayPort Alt Mode.
+
+## Fonctions
+
+- **Choix par application** : ouvrir une app sur l'écran externe ou sur le téléphone.
+- **Mode duo** : choisir une app pour le téléphone et une pour l'écran externe, puis « Lancer les deux ».
+- **Périphérique de sortie** : choisir l'écran externe cible (ou « Automatique »).
+- **Curseur sur l'écran externe** (Android 11+) : bouton flottant toujours visible qui ouvre un pavé tactile sur le téléphone (déplacer, clic, double clic, clic long, défilement à deux doigts, Retour, Accueil).
+- **Souris physique** (Android 14+) : le curseur passe du téléphone à l'écran externe par le bord droit, et revient par le bord gauche.
+
+Le curseur utilise un service d'accessibilité à activer une fois. Sur Android 13+, pour une app installée hors Play Store : Paramètres > Applications > SecondScreen > ⋮ > « Autoriser les paramètres restreints », puis activer « SecondScreen – Curseur » dans Accessibilité.

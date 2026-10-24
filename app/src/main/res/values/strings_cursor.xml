@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="cursor_service_label">SecondScreen – Curseur</string>
+    <string name="cursor_service_description">Affiche un curseur sur l\'écran externe (HDMI) et un pavé tactile sur le téléphone pour cliquer, faire défiler et revenir en arrière sur l\'écran externe. En mode souris (Android 14+), une souris branchée peut passer du téléphone à l\'écran externe. Ce service ne lit pas le contenu de vos écrans.</string>
+    <string name="cursor_bubble_desc">Ouvrir le pavé tactile</string>
+    <string name="cursor_btn_click">Clic</string>
+    <string name="cursor_btn_long_click">Clic long</string>
+    <string name="cursor_btn_back">Retour</string>
+    <string name="cursor_btn_home">Accueil</string>
+    <string name="cursor_btn_mouse_on">Souris : ON</string>
+    <string name="cursor_btn_mouse_off">Souris : OFF</string>
+    <string name="cursor_btn_close">Fermer</string>
+    <string name="cursor_touchpad_hint">Glissez pour déplacer le curseur\nTouchez pour cliquer, touchez deux fois pour double-cliquer\nAppui long pour un clic long, deux doigts pour faire défiler</string>
+    <string name="cursor_status_display">Écran externe : #%1$d %2$s (%3$d x %4$d)</string>
+    <string name="cursor_status_no_display">Aucun écran externe détecté</string>
+    <string name="cursor_overlay_failed">Impossible d\'afficher le curseur sur cet écran</string>
+    <string name="cursor_requires_android_11">Android 11 minimum requis pour contrôler l\'écran externe</string>
+    <string name="cursor_mouse_requires_android_14">Le mode souris nécessite Android 14 minimum</string>
+    <string name="cursor_mouse_mode_hint">Mode souris actif : sortez par le bord droit du téléphone pour passer sur l\'écran externe</string>
+    <string name="cursor_gesture_failed">Geste refusé par le système</string>
+</resources>
