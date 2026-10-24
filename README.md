@@ -6,6 +6,10 @@ Le lancement se fait via `ActivityOptions.setLaunchDisplayId`, en ciblant l'écr
 
 ## Obtenir l'APK sans PC
 
+**Le plus simple (depuis le téléphone) :** page **Releases** du dépôt → release **latest** → télécharger `SecondScreen.apk`. Elle est mise à jour automatiquement à chaque push sur `main`.
+
+Autre méthode, via les artifacts :
+
 1. Sur GitHub, ouvrir l'onglet **Actions** du dépôt.
 2. Ouvrir le dernier run **Build APK** réussi (coche verte).
 3. Dans la section **Artifacts**, télécharger `SecondScreen-debug-apk`. Le fichier téléchargé est une archive zip contenant `app-debug.apk`.
