@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SecondScreen</string>
+    <string name="refresh">Rafraîchir</string>
+    <string name="search_hint">Rechercher une application</string>
+    <string name="hint_text">Astuce : même si le lancement réussit, le système peut quand même afficher l\'application sur l\'écran du téléphone selon le constructeur et la version d\'Android.</string>
+    <string name="status_title">État de l\'écran externe</string>
+    <string name="status_found">Écran externe détecté</string>
+    <string name="status_none">Aucun écran externe détecté</string>
+    <string name="status_details">ID : %1$d\nNom : %2$s\nRésolution : %3$d x %4$d</string>
+    <string name="displays_title">Tous les écrans</string>
+    <string name="display_line">#%1$d  %2$s\n    %3$d x %4$d | flags=%5$d | présentation : %6$s</string>
+    <string name="yes">oui</string>
+    <string name="no">non</string>
+    <string name="apps_title">Applications installées</string>
+    <string name="apps_count">%1$d application(s)</string>
+    <string name="log_title">Journal</string>
+    <string name="log_empty">(vide)</string>
+    <string name="log_displays_refreshed">Écrans actualisés : %1$d trouvé(s), externe : %2$s</string>
+    <string name="log_apps_loaded">%1$d application(s) chargée(s)</string>
+    <string name="log_launching">Lancement de %1$s sur l\'écran %2$d…</string>
+    <string name="log_launch_sent">Lancement envoyé pour %1$s (écran %2$d)</string>
+    <string name="log_launch_error">Échec (%1$s) : %2$s</string>
+    <string name="log_no_display">Lancement annulé : aucun écran externe</string>
+    <string name="error_title">Échec du lancement</string>
+    <string name="error_details">Détail : %1$s : %2$s</string>
+    <string name="close">Fermer</string>
+    <string name="err_no_display">Aucun écran externe n\'est connecté. Branchez un écran HDMI puis appuyez sur « Rafraîchir ».</string>
+    <string name="err_security">Le système refuse de lancer cette application sur cet écran : une application non système n\'a pas le droit d\'utiliser cet écran, ou l\'écran n\'est pas considéré comme fiable.\n\nEssayez d\'activer dans les Options pour les développeurs : « Forcer les activités à être redimensionnables » et « Activer les fenêtres de forme libre » (ou « Forcer le mode bureau »), puis redémarrez le téléphone.</string>
+    <string name="err_not_found">L\'activité demandée est introuvable ou ne peut pas être lancée (application désinstallée, désactivée ou non exportée).</string>
+    <string name="err_illegal_arg">Argument invalide : l\'écran ciblé n\'existe plus ou n\'est pas valide. Rafraîchissez la liste des écrans et réessayez.</string>
+    <string name="err_generic">Une erreur inattendue s\'est produite lors du lancement.</string>
+</resources>
