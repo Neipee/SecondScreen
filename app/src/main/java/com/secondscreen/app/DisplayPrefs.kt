@@ -10,6 +10,8 @@ import android.view.Display
  */
 object DisplayPrefs {
     const val AUTO = -1
+    const val PINCH_SCREEN = "screen"
+    const val PINCH_APP = "app"
 
     private const val PREFS = "secondscreen_prefs"
     private const val KEY_DISPLAY = "preferred_display_id"
@@ -17,6 +19,7 @@ object DisplayPrefs {
     private const val KEY_BUBBLE = "bubble_enabled"
     private const val KEY_AUTO_DENSITY = "auto_reapply_density"
     private const val KEY_FORCE_SPEAKER = "force_phone_speaker"
+    private const val KEY_PINCH_MODE = "pinch_mode"
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -61,6 +64,14 @@ object DisplayPrefs {
 
     fun setForceSpeaker(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit().putBoolean(KEY_FORCE_SPEAKER, enabled).apply()
+    }
+
+    /** Touchpad pinch mode: [PINCH_SCREEN] (system density of the display) or [PINCH_APP] (pinch gesture). */
+    fun getPinchMode(ctx: Context): String =
+        if (prefs(ctx).getString(KEY_PINCH_MODE, PINCH_SCREEN) == PINCH_APP) PINCH_APP else PINCH_SCREEN
+
+    fun setPinchMode(ctx: Context, mode: String) {
+        prefs(ctx).edit().putString(KEY_PINCH_MODE, if (mode == PINCH_APP) PINCH_APP else PINCH_SCREEN).apply()
     }
 
     /** All displays other than the phone's own screen. */

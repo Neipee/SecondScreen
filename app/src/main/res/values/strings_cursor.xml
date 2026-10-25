@@ -10,7 +10,7 @@
     <string name="cursor_btn_mouse_on">Souris : ON</string>
     <string name="cursor_btn_mouse_off">Souris : OFF</string>
     <string name="cursor_btn_close">Fermer</string>
-    <string name="cursor_touchpad_hint">Glissez pour déplacer le curseur\nTouchez pour cliquer, touchez deux fois pour double-cliquer\nAppui long pour un clic long, deux doigts pour faire défiler</string>
+    <string name="cursor_touchpad_hint">Glissez pour déplacer le curseur\nTouchez pour cliquer, touchez deux fois pour double-cliquer\nAppui long pour un clic long, deux doigts pour faire défiler\nPincez ou écartez deux doigts pour zoomer</string>
     <string name="cursor_status_display">Écran externe : #%1$d %2$s (%3$d x %4$d)</string>
     <string name="cursor_status_no_display">Aucun écran externe détecté</string>
     <string name="cursor_overlay_failed">Impossible d\'afficher le curseur sur cet écran</string>
@@ -18,4 +18,15 @@
     <string name="cursor_mouse_requires_android_14">Le mode souris nécessite Android 14 minimum</string>
     <string name="cursor_mouse_mode_hint">Mode souris actif : sortez par le bord droit du téléphone pour passer sur l\'écran externe</string>
     <string name="cursor_gesture_failed">Geste refusé par le système</string>
+    <string name="cursor_btn_pinch_screen">Pincer : écran</string>
+    <string name="cursor_btn_pinch_app">Pincer : app</string>
+    <string name="cursor_btn_zoom_in">Zoom +</string>
+    <string name="cursor_btn_zoom_out">Zoom −</string>
+    <string name="cursor_zoom_screen_label">Zoom écran : %1$d dpi</string>
+    <string name="cursor_zoom_app_label">Zoom app : %1$d %%</string>
+    <string name="cursor_zoom_needs_shizuku">Shizuku requis pour zoomer l\'écran — passage en mode « app »</string>
+    <string name="cursor_zoom_applying">Zoom écran : application de %1$d dpi…</string>
+    <string name="cursor_zoom_limit">Limite de zoom atteinte (%1$d dpi)</string>
+    <string name="cursor_pinch_mode_screen">Pincer = zoom de tout l\'écran externe (densité, Shizuku)</string>
+    <string name="cursor_pinch_mode_app">Pincer = geste de zoom dans l\'application sous le curseur</string>
 </resources>

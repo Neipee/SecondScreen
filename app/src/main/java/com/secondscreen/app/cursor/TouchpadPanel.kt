@@ -2,15 +2,18 @@ package com.secondscreen.app.cursor
 
 import android.graphics.Color
 import android.graphics.PixelFormat
+import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.util.Log
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import com.secondscreen.app.DisplayPrefs
 import com.secondscreen.app.R
 
 /** Touchpad + buttons panel shown at the bottom of the phone screen. */
@@ -31,6 +34,21 @@ internal class TouchpadPanel(
     }
 
     private lateinit var mouseButton: TextView
+    private lateinit var pinchModeButton: TextView
+
+    /** Big live label shown over the touchpad while pinching. */
+    private val zoomLabel: TextView = TextView(service).apply {
+        setTextColor(Color.WHITE)
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, 26f)
+        setTypeface(typeface, Typeface.BOLD)
+        gravity = Gravity.CENTER
+        setPadding(dp(20f), dp(12f), dp(20f), dp(12f))
+        background = GradientDrawable().apply {
+            cornerRadius = 14f * density
+            setColor(0xCC3F51B5.toInt())
+        }
+        visibility = View.GONE
+    }
 
     private val touchpad = TouchpadView(service, object : TouchpadView.Listener {
         override fun onMove(dx: Float, dy: Float) = service.touchpadMove(dx, dy)
@@ -38,6 +56,10 @@ internal class TouchpadPanel(
         override fun onDoubleTap() = service.doubleClickAtCursor()
         override fun onLongPress() = service.longPressAtCursor()
         override fun onScroll(dirX: Float, dirY: Float) = service.touchpadScroll(dirX, dirY)
+        override fun onPinchStart() = service.pinchStart()
+        override fun onPinchUpdate(scale: Float) = service.pinchUpdate(scale)
+        override fun onPinchEnd(scale: Float) = service.pinchEnd(scale)
+        override fun onPinchCancel() = service.pinchCancel()
     })
 
     private val root: LinearLayout = buildRoot()
@@ -84,6 +106,14 @@ internal class TouchpadPanel(
             touchpad,
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
         )
+        padFrame.addView(
+            zoomLabel,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.CENTER,
+            ),
+        )
         layout.addView(
             padFrame,
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f).apply {
@@ -105,14 +135,21 @@ internal class TouchpadPanel(
             buttonParams(),
         )
 
+        val row3 = LinearLayout(service).apply { orientation = LinearLayout.HORIZONTAL }
+        pinchModeButton = makeButton(R.string.cursor_btn_pinch_screen, 0xFF00796B.toInt()) { service.togglePinchMode() }
+        row3.addView(pinchModeButton, buttonParams(1.4f))
+        row3.addView(makeButton(R.string.cursor_btn_zoom_out, 0xFF00796B.toInt()) { service.zoomStep(false) }, buttonParams())
+        row3.addView(makeButton(R.string.cursor_btn_zoom_in, 0xFF00796B.toInt()) { service.zoomStep(true) }, buttonParams())
+
         val rowParams = { LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT) }
         layout.addView(row1, rowParams())
         layout.addView(row2, rowParams())
+        layout.addView(row3, rowParams())
         return layout
     }
 
-    private fun buttonParams() =
-        LinearLayout.LayoutParams(0, dp(44f), 1f).apply {
+    private fun buttonParams(weight: Float = 1f) =
+        LinearLayout.LayoutParams(0, dp(44f), weight).apply {
             setMargins(dp(4f), dp(4f), dp(4f), dp(4f))
         }
 
@@ -122,6 +159,7 @@ internal class TouchpadPanel(
             setTextColor(Color.WHITE)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
             gravity = Gravity.CENTER
+            maxLines = 1
             isClickable = true
             background = GradientDrawable().apply {
                 cornerRadius = 10f * density
@@ -174,6 +212,23 @@ internal class TouchpadPanel(
         mouseButton.text = service.getString(
             if (service.isMouseModeActive) R.string.cursor_btn_mouse_on else R.string.cursor_btn_mouse_off,
         )
+        pinchModeButton.text = service.getString(
+            if (DisplayPrefs.getPinchMode(service) == DisplayPrefs.PINCH_APP) {
+                R.string.cursor_btn_pinch_app
+            } else {
+                R.string.cursor_btn_pinch_screen
+            },
+        )
+    }
+
+    /** Shows (or updates) the big zoom label over the touchpad. */
+    fun showZoomLabel(text: String) {
+        zoomLabel.text = text
+        zoomLabel.visibility = View.VISIBLE
+    }
+
+    fun hideZoomLabel() {
+        zoomLabel.visibility = View.GONE
     }
 
     /** Shows a transient message in the status line (until the next status refresh). */

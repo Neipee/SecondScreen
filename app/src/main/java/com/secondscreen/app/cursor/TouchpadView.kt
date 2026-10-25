@@ -4,18 +4,20 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.drawable.GradientDrawable
 import android.os.SystemClock
+import android.util.Log
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
 import kotlin.math.abs
 import kotlin.math.hypot
+import kotlin.math.max
 import kotlin.math.min
 
 /**
  * Laptop-style touchpad surface:
  * one-finger drag = move, tap = click, double tap = double click,
- * long press (no movement) = long click, two-finger drag = scroll.
+ * long press (no movement) = long click, two-finger drag = scroll, two-finger pinch = zoom.
  */
 @SuppressLint("ViewConstructor")
 internal class TouchpadView(context: Context, private val listener: Listener) : View(context) {
@@ -27,7 +29,16 @@ internal class TouchpadView(context: Context, private val listener: Listener) : 
         fun onLongPress()
         /** Finger direction of a two-finger scroll step: one of (±1, 0) or (0, ±1). */
         fun onScroll(dirX: Float, dirY: Float)
+        /** Two-finger gesture recognised as a pinch (distance change dominates). */
+        fun onPinchStart()
+        /** Cumulative scale = current finger distance / start distance (> 1 = fingers spread). */
+        fun onPinchUpdate(scale: Float)
+        /** One of the two fingers was lifted; [scale] is the final cumulative scale. */
+        fun onPinchEnd(scale: Float)
+        fun onPinchCancel()
     }
+
+    private enum class TwoFinger { NONE, UNDECIDED, SCROLL, PINCH, DONE }
 
     private val density = resources.displayMetrics.density
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
@@ -51,6 +62,15 @@ internal class TouchpadView(context: Context, private val listener: Listener) : 
     private var lastScrollEmit = 0L
 
     private var tapPending = false
+
+    private val pinchThresholdPx = max(40f, 12f * density)
+    private var twoMode = TwoFinger.NONE
+    private var pidA = MotionEvent.INVALID_POINTER_ID
+    private var pidB = MotionEvent.INVALID_POINTER_ID
+    private var startDist = 0f
+    private var startMidX = 0f
+    private var startMidY = 0f
+    private var lastScale = 1f
 
     private val longPressRunnable = Runnable {
         if (tracking && !moved && !multi) {
@@ -76,6 +96,15 @@ internal class TouchpadView(context: Context, private val listener: Listener) : 
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        try {
+            handleTouch(event)
+        } catch (t: Throwable) {
+            Log.w(TAG, "Touchpad event handling failed", t)
+        }
+        return true
+    }
+
+    private fun handleTouch(event: MotionEvent) {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 tracking = true
@@ -87,32 +116,44 @@ internal class TouchpadView(context: Context, private val listener: Listener) : 
                 moved = false
                 multi = false
                 longPressFired = false
+                twoMode = TwoFinger.NONE
+                pidA = MotionEvent.INVALID_POINTER_ID
+                pidB = MotionEvent.INVALID_POINTER_ID
                 removeCallbacks(longPressRunnable)
                 postDelayed(longPressRunnable, LONG_PRESS_MS)
             }
 
             MotionEvent.ACTION_POINTER_DOWN -> {
-                if (event.pointerCount >= 2) {
-                    multi = true
-                    removeCallbacks(longPressRunnable)
-                    lastCx = (event.getX(0) + event.getX(1)) / 2f
-                    lastCy = (event.getY(0) + event.getY(1)) / 2f
-                    scrollAccX = 0f
-                    scrollAccY = 0f
+                multi = true
+                removeCallbacks(longPressRunnable)
+                // Only the first two fingers form the pair; extra fingers are ignored.
+                if (tracking && twoMode == TwoFinger.NONE && event.pointerCount >= 2) {
+                    pidA = event.getPointerId(0)
+                    pidB = event.getPointerId(1)
+                    startTwoFinger(event)
                 }
             }
 
             MotionEvent.ACTION_MOVE -> {
-                if (!tracking) return true
+                if (!tracking) return
                 if (multi) {
-                    if (event.pointerCount >= 2) handleScrollMove(event)
+                    handleTwoFingerMove(event)
                 } else {
                     handleSingleMove(event)
                 }
             }
 
+            MotionEvent.ACTION_POINTER_UP -> {
+                val idx = event.actionIndex
+                if (idx in 0 until event.pointerCount) {
+                    val upId = event.getPointerId(idx)
+                    if (upId == pidA || upId == pidB) endTwoFinger()
+                }
+            }
+
             MotionEvent.ACTION_UP -> {
                 removeCallbacks(longPressRunnable)
+                endTwoFinger()
                 val quick = event.eventTime - downTime < TAP_MAX_MS
                 if (tracking && !multi && !moved && !longPressFired && quick) {
                     performClick()
@@ -127,15 +168,17 @@ internal class TouchpadView(context: Context, private val listener: Listener) : 
                 }
                 tracking = false
                 multi = false
+                twoMode = TwoFinger.NONE
             }
 
             MotionEvent.ACTION_CANCEL -> {
                 removeCallbacks(longPressRunnable)
+                cancelPinch()
                 tracking = false
                 multi = false
+                twoMode = TwoFinger.NONE
             }
         }
-        return true
     }
 
     override fun performClick(): Boolean = super.performClick()
@@ -157,9 +200,87 @@ internal class TouchpadView(context: Context, private val listener: Listener) : 
         listener.onMove(dx * factor, dy * factor)
     }
 
-    private fun handleScrollMove(event: MotionEvent) {
-        val cx = (event.getX(0) + event.getX(1)) / 2f
-        val cy = (event.getY(0) + event.getY(1)) / 2f
+    private fun startTwoFinger(event: MotionEvent) {
+        val ia = event.findPointerIndex(pidA)
+        val ib = event.findPointerIndex(pidB)
+        if (ia < 0 || ib < 0) {
+            twoMode = TwoFinger.DONE
+            return
+        }
+        val ax = event.getX(ia)
+        val ay = event.getY(ia)
+        val bx = event.getX(ib)
+        val by = event.getY(ib)
+        startDist = hypot(ax - bx, ay - by)
+        startMidX = (ax + bx) / 2f
+        startMidY = (ay + by) / 2f
+        lastCx = startMidX
+        lastCy = startMidY
+        scrollAccX = 0f
+        scrollAccY = 0f
+        lastScale = 1f
+        twoMode = TwoFinger.UNDECIDED
+    }
+
+    private fun handleTwoFingerMove(event: MotionEvent) {
+        if (twoMode != TwoFinger.UNDECIDED && twoMode != TwoFinger.SCROLL && twoMode != TwoFinger.PINCH) return
+        val ia = event.findPointerIndex(pidA)
+        val ib = event.findPointerIndex(pidB)
+        if (ia < 0 || ib < 0) return
+        val ax = event.getX(ia)
+        val ay = event.getY(ia)
+        val bx = event.getX(ib)
+        val by = event.getY(ib)
+        val dist = hypot(ax - bx, ay - by)
+        val midX = (ax + bx) / 2f
+        val midY = (ay + by) / 2f
+        when (twoMode) {
+            TwoFinger.UNDECIDED -> {
+                val distChange = abs(dist - startDist)
+                val midMove = hypot(midX - startMidX, midY - startMidY)
+                if (distChange > pinchThresholdPx && distChange > midMove && startDist > 1f) {
+                    twoMode = TwoFinger.PINCH
+                    lastScale = dist / startDist
+                    listener.onPinchStart()
+                    listener.onPinchUpdate(lastScale)
+                } else if (midMove > touchSlop && midMove >= distChange) {
+                    twoMode = TwoFinger.SCROLL
+                    handleScrollMove(midX, midY)
+                }
+            }
+
+            TwoFinger.SCROLL -> handleScrollMove(midX, midY)
+
+            TwoFinger.PINCH -> {
+                val scale = if (startDist > 1f) (dist / startDist).coerceIn(MIN_SCALE, MAX_SCALE) else 1f
+                if (abs(scale - lastScale) >= 0.005f) {
+                    lastScale = scale
+                    listener.onPinchUpdate(scale)
+                }
+            }
+
+            else -> Unit
+        }
+    }
+
+    /** One of the two tracked fingers was lifted: finish the pinch, ignore the rest of the gesture. */
+    private fun endTwoFinger() {
+        val wasPinch = twoMode == TwoFinger.PINCH
+        if (twoMode != TwoFinger.NONE) twoMode = TwoFinger.DONE
+        pidA = MotionEvent.INVALID_POINTER_ID
+        pidB = MotionEvent.INVALID_POINTER_ID
+        if (wasPinch) listener.onPinchEnd(lastScale)
+    }
+
+    private fun cancelPinch() {
+        val wasPinch = twoMode == TwoFinger.PINCH
+        twoMode = TwoFinger.NONE
+        pidA = MotionEvent.INVALID_POINTER_ID
+        pidB = MotionEvent.INVALID_POINTER_ID
+        if (wasPinch) listener.onPinchCancel()
+    }
+
+    private fun handleScrollMove(cx: Float, cy: Float) {
         scrollAccX += cx - lastCx
         scrollAccY += cy - lastCy
         lastCx = cx
@@ -184,6 +305,11 @@ internal class TouchpadView(context: Context, private val listener: Listener) : 
         removeCallbacks(singleTapRunnable)
         tapPending = false
         tracking = false
+        try {
+            cancelPinch()
+        } catch (t: Throwable) {
+            Log.w(TAG, "Pinch cancel failed", t)
+        }
         super.onDetachedFromWindow()
     }
 
@@ -194,5 +320,8 @@ internal class TouchpadView(context: Context, private val listener: Listener) : 
         const val SCROLL_MIN_INTERVAL_MS = 230L
         const val BASE_SENSITIVITY = 1.5f
         const val ACCEL_GAIN = 0.67f
+        const val MIN_SCALE = 0.1f
+        const val MAX_SCALE = 10f
+        const val TAG = "SecondScreen"
     }
 }

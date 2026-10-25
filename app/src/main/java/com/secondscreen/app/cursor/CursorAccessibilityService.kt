@@ -19,9 +19,16 @@ import android.view.accessibility.AccessibilityEvent
 import androidx.annotation.RequiresApi
 import com.secondscreen.app.DisplayPrefs
 import com.secondscreen.app.R
+import com.secondscreen.app.privileged.ExternalDisplayTweaks
+import com.secondscreen.app.privileged.PrivResult
+import com.secondscreen.app.privileged.ShizukuShell
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
 
 /**
  * Accessibility service providing:
@@ -44,6 +51,16 @@ class CursorAccessibilityService : AccessibilityService() {
         private const val SCROLL_MS = 200L
         private const val SCROLL_PX = 300f
         private const val DRAG_THRESHOLD_PX = 20f
+
+        private const val MIN_DPI = 100
+        private const val MAX_DPI = 640
+        private const val DPI_STEP = 20
+        private const val PINCH_MS = 350L
+        private const val PINCH_D0_PX = 100f
+        private const val PINCH_MIN_PX = 20f
+        private const val PINCH_MAX_FRACTION = 0.45f
+        private const val BUTTON_ZOOM_IN_SCALE = 1.6f
+        private const val BUTTON_ZOOM_OUT_SCALE = 0.6f
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -80,6 +97,15 @@ class CursorAccessibilityService : AccessibilityService() {
         scrollFlushPosted = false
         flushWheelScroll()
     }
+
+    // Pinch / zoom state.
+    private var zoomExecutor: ExecutorService? = null
+    private var pinchActive = false
+    private var pinchScreen = false
+    private var pinchDisplayId = Display.INVALID_DISPLAY
+    private var pinchStartDpi = 0
+    private var pendingDensityDisplay = Display.INVALID_DISPLAY
+    private var pendingDensity = 0
 
     private val displayListener = object : DisplayManager.DisplayListener {
         override fun onDisplayAdded(displayId: Int) = onDisplaysChanged()
@@ -152,6 +178,14 @@ class CursorAccessibilityService : AccessibilityService() {
         }
         isMouseModeActive = false
         primaryDown = false
+        pinchActive = false
+        pendingDensity = 0
+        try {
+            zoomExecutor?.shutdown()
+        } catch (t: Throwable) {
+            Log.w(TAG, "zoom executor shutdown failed", t)
+        }
+        zoomExecutor = null
         safe("teardown overlays") {
             bubble?.hide()
             panel?.hide()
@@ -280,6 +314,187 @@ class CursorAccessibilityService : AccessibilityService() {
         }
         DisplayPrefs.setMouseModeEnabled(this, !DisplayPrefs.isMouseModeEnabled(this))
         refreshFromPrefs()
+    }
+
+    // ------------------------------------------------------------------ pinch / zoom (panel)
+
+    internal fun togglePinchMode() {
+        val newMode = if (DisplayPrefs.getPinchMode(this) == DisplayPrefs.PINCH_APP) {
+            DisplayPrefs.PINCH_SCREEN
+        } else {
+            DisplayPrefs.PINCH_APP
+        }
+        DisplayPrefs.setPinchMode(this, newMode)
+        panel?.updateStatus()
+        panel?.showMessage(
+            getString(
+                if (newMode == DisplayPrefs.PINCH_APP) R.string.cursor_pinch_mode_app else R.string.cursor_pinch_mode_screen,
+            ),
+        )
+    }
+
+    /**
+     * True when the system (density) zoom can be used now; otherwise shows why (Shizuku missing)
+     * so the caller falls back to the in-app pinch gesture.
+     */
+    private fun canZoomScreen(): Boolean {
+        if (DisplayPrefs.getPinchMode(this) != DisplayPrefs.PINCH_SCREEN) return false
+        if (externalDisplayId == Display.INVALID_DISPLAY || !isDisplayPresent(externalDisplayId)) return false
+        if (!ShizukuShell.hasPermission()) {
+            panel?.showMessage(getString(R.string.cursor_zoom_needs_shizuku))
+            return false
+        }
+        return true
+    }
+
+    /** Non-blocking: density currently used by [displayId] (or the one we are applying). 0 if unknown. */
+    private fun currentDensityOf(displayId: Int): Int {
+        if (pendingDensity > 0 && pendingDensityDisplay == displayId) return pendingDensity
+        return try {
+            val d = displayManager.getDisplay(displayId)
+            if (d == null) 0 else createDisplayContext(d).resources.displayMetrics.densityDpi
+        } catch (t: Throwable) {
+            Log.w(TAG, "Unable to read density of display $displayId", t)
+            0
+        }
+    }
+
+    private fun pinchTargetDpi(startDpi: Int, scale: Float): Int =
+        ((startDpi * scale / 10f).roundToInt() * 10).coerceIn(MIN_DPI, MAX_DPI)
+
+    internal fun pinchStart() {
+        pinchActive = false
+        pinchScreen = false
+        if (!connected) return
+        safe("pinchStart") {
+            if (!ensureTouchpadCursor()) return@safe
+            if (canZoomScreen()) {
+                val dpi = currentDensityOf(externalDisplayId)
+                if (dpi > 0) {
+                    pinchScreen = true
+                    pinchDisplayId = externalDisplayId
+                    pinchStartDpi = dpi
+                }
+            }
+            if (!pinchScreen) pinchDisplayId = curDisplayId
+            pinchActive = true
+            pinchUpdate(1f)
+        }
+    }
+
+    internal fun pinchUpdate(scale: Float) {
+        if (!pinchActive) return
+        safe("pinchUpdate") {
+            val text = if (pinchScreen) {
+                getString(R.string.cursor_zoom_screen_label, pinchTargetDpi(pinchStartDpi, scale))
+            } else {
+                getString(R.string.cursor_zoom_app_label, (scale * 100f).roundToInt())
+            }
+            panel?.showZoomLabel(text)
+        }
+    }
+
+    internal fun pinchEnd(scale: Float) {
+        panel?.hideZoomLabel()
+        if (!pinchActive) return
+        pinchActive = false
+        safe("pinchEnd") {
+            if (pinchScreen) {
+                val dpi = pinchTargetDpi(pinchStartDpi, scale)
+                if (dpi != pinchStartDpi) applyDensityAsync(pinchDisplayId, dpi)
+            } else if (abs(scale - 1f) >= 0.05f) {
+                pinchAt(pinchDisplayId, scale)
+            }
+        }
+    }
+
+    internal fun pinchCancel() {
+        pinchActive = false
+        panel?.hideZoomLabel()
+    }
+
+    /** "Zoom +" / "Zoom −" buttons. */
+    internal fun zoomStep(zoomIn: Boolean) {
+        if (!connected || !ensureTouchpadCursor()) return
+        if (canZoomScreen()) {
+            val id = externalDisplayId
+            val base = currentDensityOf(id)
+            if (base > 0) {
+                val target = (base + if (zoomIn) DPI_STEP else -DPI_STEP).coerceIn(MIN_DPI, MAX_DPI)
+                if (target == base) {
+                    panel?.showMessage(getString(R.string.cursor_zoom_limit, base))
+                } else {
+                    applyDensityAsync(id, target)
+                }
+                return
+            }
+        }
+        pinchAt(curDisplayId, if (zoomIn) BUTTON_ZOOM_IN_SCALE else BUTTON_ZOOM_OUT_SCALE)
+    }
+
+    /** Applies a density override through Shizuku on a background thread, reports in the panel. */
+    private fun applyDensityAsync(displayId: Int, dpi: Int) {
+        pendingDensityDisplay = displayId
+        pendingDensity = dpi
+        panel?.showMessage(getString(R.string.cursor_zoom_applying, dpi))
+        try {
+            val executor = zoomExecutor ?: Executors.newSingleThreadExecutor().also { zoomExecutor = it }
+            executor.execute {
+                val result: PrivResult = try {
+                    ExternalDisplayTweaks.setDensity(displayId, dpi)
+                } catch (t: Throwable) {
+                    PrivResult(false, "Impossible de changer la densité : ${t.message}")
+                }
+                handler.post {
+                    if (pendingDensityDisplay == displayId && pendingDensity == dpi) pendingDensity = 0
+                    if (connected) {
+                        if (result.ok) DisplayPrefs.setSavedDensity(this, displayId, dpi)
+                        panel?.showMessage(result.message)
+                    }
+                }
+            }
+        } catch (t: Throwable) {
+            Log.e(TAG, "Unable to schedule density change", t)
+            pendingDensity = 0
+        }
+    }
+
+    /**
+     * Two-finger pinch gesture centred on the cursor: fingers start [PINCH_D0_PX] from the cursor
+     * horizontally and end at d0 * [scale] (scale > 1 = spread = zoom in).
+     */
+    private fun pinchAt(displayId: Int, scale: Float) {
+        val b = boundsOf(displayId) ?: run {
+            Log.w(TAG, "pinch: display $displayId not available")
+            return
+        }
+        val w = b.width().toFloat()
+        val h = b.height().toFloat()
+        if (w < 8f || h < 8f) return
+        val maxD1 = max(PINCH_MIN_PX, w * PINCH_MAX_FRACTION)
+        val d0 = min(PINCH_D0_PX, maxD1)
+        val d1 = (d0 * scale).coerceIn(PINCH_MIN_PX, maxD1)
+        val reach = max(d0, d1)
+        val minX = 1f
+        val maxX = w - 2f
+        val cx = if (maxX - minX > 2f * reach) curX.coerceIn(minX + reach, maxX - reach) else w / 2f
+        val cy = curY.coerceIn(1f, h - 2f)
+        val left = Path().apply {
+            moveTo((cx - d0).coerceIn(minX, maxX), cy)
+            lineTo((cx - d1).coerceIn(minX, maxX), cy)
+        }
+        val right = Path().apply {
+            moveTo((cx + d0).coerceIn(minX, maxX), cy)
+            lineTo((cx + d1).coerceIn(minX, maxX), cy)
+        }
+        dispatchOn(
+            displayId,
+            listOf(
+                GestureDescription.StrokeDescription(left, 0L, PINCH_MS),
+                GestureDescription.StrokeDescription(right, 0L, PINCH_MS),
+            ),
+            "pinch",
+        )
     }
 
     internal fun statusText(): String {
