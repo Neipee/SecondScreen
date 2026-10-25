@@ -71,6 +71,7 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         setSupportActionBar(binding.toolbar)
+        supportActionBar?.subtitle = "Version " + BuildConfig.VERSION_NAME
 
         displayManager = getSystemService(DISPLAY_SERVICE) as DisplayManager
 

@@ -11,8 +11,20 @@ android {
         applicationId = "com.secondscreen.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        // Build number from GitHub Actions, so each APK is newer than the previous one
+        val runNumber = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
+        versionCode = runNumber
+        versionName = "1.$runNumber"
+    }
+
+    // Fixed key so every CI build can be installed over the previous one
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("secondscreen-debug.jks")
+            storePassword = "android"
+            keyAlias = "secondscreen"
+            keyPassword = "android"
+        }
     }
 
     buildTypes {
@@ -36,6 +48,7 @@ android {
 
     buildFeatures {
         viewBinding = true
+        buildConfig = true
     }
 }
 
