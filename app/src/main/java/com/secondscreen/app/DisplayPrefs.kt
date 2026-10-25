@@ -15,6 +15,8 @@ object DisplayPrefs {
     private const val KEY_DISPLAY = "preferred_display_id"
     private const val KEY_MOUSE_MODE = "mouse_mode_enabled"
     private const val KEY_BUBBLE = "bubble_enabled"
+    private const val KEY_AUTO_DENSITY = "auto_reapply_density"
+    private const val KEY_FORCE_SPEAKER = "force_phone_speaker"
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -34,6 +36,31 @@ object DisplayPrefs {
 
     fun setBubbleEnabled(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit().putBoolean(KEY_BUBBLE, enabled).apply()
+    }
+
+    fun getSavedDensity(ctx: Context, displayId: Int): Int? {
+        val v = prefs(ctx).getInt("saved_density_$displayId", -1)
+        return if (v > 0) v else null
+    }
+
+    fun setSavedDensity(ctx: Context, displayId: Int, dpi: Int) {
+        prefs(ctx).edit().putInt("saved_density_$displayId", dpi).apply()
+    }
+
+    fun clearSavedDensity(ctx: Context, displayId: Int) {
+        prefs(ctx).edit().remove("saved_density_$displayId").apply()
+    }
+
+    fun isAutoReapplyDensity(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_AUTO_DENSITY, false)
+
+    fun setAutoReapplyDensity(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit().putBoolean(KEY_AUTO_DENSITY, enabled).apply()
+    }
+
+    fun getForceSpeaker(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_FORCE_SPEAKER, false)
+
+    fun setForceSpeaker(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit().putBoolean(KEY_FORCE_SPEAKER, enabled).apply()
     }
 
     /** All displays other than the phone's own screen. */

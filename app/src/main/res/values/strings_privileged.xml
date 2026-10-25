@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="priv_shizuku_not_installed">Shizuku non installé</string>
+    <string name="priv_shizuku_not_running">Shizuku non démarré : ouvrez l\'application Shizuku et démarrez-la</string>
+    <string name="priv_shizuku_denied">Permission Shizuku refusée</string>
+</resources>

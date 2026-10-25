@@ -6,6 +6,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.hardware.display.DisplayManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -22,6 +23,10 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.secondscreen.app.cursor.CursorAccessibilityService
 import com.secondscreen.app.databinding.ActivityMainBinding
+import com.secondscreen.app.privileged.AudioRouting
+import com.secondscreen.app.privileged.ExternalDisplayTweaks
+import com.secondscreen.app.privileged.PrivResult
+import com.secondscreen.app.privileged.ShizukuShell
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -42,9 +47,14 @@ class MainActivity : AppCompatActivity() {
     private val logLines = ArrayDeque<String>()
     private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
 
+    private var permToken: Any? = null
+    private var sliderDisplayId = -2
+    private var currentDensity: Int? = null
+
     private val displayListener = object : DisplayManager.DisplayListener {
         override fun onDisplayAdded(displayId: Int) {
             refreshDisplays()
+            autoReapplyOnAdded()
         }
 
         override fun onDisplayRemoved(displayId: Int) {
@@ -76,17 +86,22 @@ class MainActivity : AppCompatActivity() {
         setupOutputSpinner()
         setupCursorCard()
         setupDuoCard()
+        setupShizukuCard()
+        setupDensityCard()
+        setupAudioCard()
 
         renderLog()
         refreshDisplays()
         renderCursorStatus()
         renderDuo()
         loadApps()
+        renderShizuku()
     }
 
     override fun onResume() {
         super.onResume()
         renderCursorStatus()
+        renderShizuku()
     }
 
     override fun onStart() {
@@ -101,6 +116,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        permToken?.let {
+            try {
+                ShizukuShell.removePermissionResultListener(it)
+            } catch (e: Exception) {
+            }
+        }
+        permToken = null
         handler.removeCallbacksAndMessages(null)
         executor.shutdown()
         super.onDestroy()
@@ -145,6 +167,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         renderOutputSpinner()
+        renderShizuku()
 
         log(
             getString(
@@ -354,6 +377,274 @@ class MainActivity : AppCompatActivity() {
             if (CursorAccessibilityService.instance != null) R.string.cursor_active
             else R.string.cursor_inactive
         )
+    }
+
+    // ---- Shizuku / density / audio ----
+
+    private fun shizukuReady(): Boolean = try {
+        ShizukuShell.isInstalled(this) && ShizukuShell.isRunning() && ShizukuShell.hasPermission()
+    } catch (e: Exception) {
+        false
+    }
+
+    private fun runPriv(work: () -> PrivResult, done: (PrivResult) -> Unit) {
+        try {
+            executor.execute {
+                val r = try {
+                    work()
+                } catch (e: Exception) {
+                    PrivResult(false, e.javaClass.simpleName + ": " + (e.message ?: "-"))
+                }
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    done(r)
+                }
+            }
+        } catch (e: Exception) {
+            done(PrivResult(false, e.message ?: "-"))
+        }
+    }
+
+    private fun showPrivError(titleRes: Int, message: String) {
+        MaterialAlertDialogBuilder(this)
+            .setTitle(titleRes)
+            .setMessage(message)
+            .setPositiveButton(R.string.close, null)
+            .show()
+    }
+
+    private fun setupShizukuCard() {
+        binding.shizukuAuthorizeButton.setOnClickListener {
+            try {
+                ShizukuShell.requestPermission()
+            } catch (e: Exception) {
+                handleError(e, R.string.err_generic)
+            }
+        }
+        binding.shizukuInstallButton.setOnClickListener {
+            try {
+                startActivity(
+                    Intent(
+                        Intent.ACTION_VIEW,
+                        Uri.parse("https://play.google.com/store/apps/details?id=moe.shizuku.privileged.api")
+                    )
+                )
+            } catch (e: Exception) {
+                try {
+                    startActivity(
+                        Intent(Intent.ACTION_VIEW, Uri.parse("https://shizuku.rikka.app/download/"))
+                    )
+                } catch (e2: Exception) {
+                    handleError(e2, R.string.err_generic)
+                }
+            }
+        }
+        try {
+            permToken = ShizukuShell.addPermissionResultListener { granted ->
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    log(
+                        getString(
+                            R.string.shizuku_perm_result,
+                            getString(if (granted) R.string.granted else R.string.denied)
+                        )
+                    )
+                    renderShizuku()
+                }
+            }
+        } catch (e: Exception) {
+            log(getString(R.string.log_launch_error, e.javaClass.simpleName, e.message ?: "-"))
+        }
+    }
+
+    private fun renderShizuku() {
+        val installed = try { ShizukuShell.isInstalled(this) } catch (e: Exception) { false }
+        val running = try { ShizukuShell.isRunning() } catch (e: Exception) { false }
+        val perm = try { ShizukuShell.hasPermission() } catch (e: Exception) { false }
+        binding.shizukuStatus.setText(
+            when {
+                !installed && !running -> R.string.shizuku_not_installed
+                !running -> R.string.shizuku_not_running
+                !perm -> R.string.shizuku_no_permission
+                else -> R.string.shizuku_ready
+            }
+        )
+        binding.shizukuAuthorizeButton.isEnabled = running && !perm
+        binding.shizukuInstallButton.isEnabled = !installed
+        renderDensity()
+        renderAudio()
+    }
+
+    private fun snapDpi(v: Int): Int {
+        val r = ((v + 10) / 20) * 20
+        return r.coerceIn(100, 480)
+    }
+
+    private fun updateDensityValueLabel() {
+        binding.densityValue.text =
+            getString(R.string.density_value, binding.densitySlider.value.toInt())
+    }
+
+    private fun setupDensityCard() {
+        binding.densitySlider.value = 240f
+        updateDensityValueLabel()
+        binding.densitySlider.addOnChangeListener { _, _, _ -> updateDensityValueLabel() }
+        binding.densityPresetSmall.setOnClickListener { binding.densitySlider.value = 160f }
+        binding.densityPresetMedium.setOnClickListener { binding.densitySlider.value = 240f }
+        binding.densityPresetLarge.setOnClickListener { binding.densitySlider.value = 320f }
+        binding.densityAutoSwitch.isChecked = DisplayPrefs.isAutoReapplyDensity(this)
+        binding.densityAutoSwitch.setOnCheckedChangeListener { _, checked ->
+            DisplayPrefs.setAutoReapplyDensity(this, checked)
+        }
+        binding.densityApplyButton.setOnClickListener {
+            val display = DisplayPrefs.resolveTargetDisplay(this) ?: return@setOnClickListener
+            val id = display.displayId
+            val dpi = snapDpi(binding.densitySlider.value.toInt())
+            runPriv({ ExternalDisplayTweaks.setDensity(id, dpi) }) { r ->
+                log(getString(R.string.log_density_apply, id, dpi, r.message))
+                if (r.ok) {
+                    DisplayPrefs.setSavedDensity(this, id, dpi)
+                } else {
+                    showPrivError(R.string.density_title_error, r.message)
+                }
+                refreshCurrentDensity()
+            }
+        }
+        binding.densityResetButton.setOnClickListener {
+            val display = DisplayPrefs.resolveTargetDisplay(this) ?: return@setOnClickListener
+            val id = display.displayId
+            runPriv({ ExternalDisplayTweaks.resetDensity(id) }) { r ->
+                log(getString(R.string.log_density_reset, id, r.message))
+                if (r.ok) {
+                    DisplayPrefs.clearSavedDensity(this, id)
+                } else {
+                    showPrivError(R.string.density_title_error, r.message)
+                }
+                refreshCurrentDensity()
+            }
+        }
+        renderDensity()
+    }
+
+    private fun renderDensity() {
+        val display = DisplayPrefs.resolveTargetDisplay(this)
+        val ready = shizukuReady()
+        val enabled = display != null && ready
+        binding.densitySlider.isEnabled = enabled
+        binding.densityPresetSmall.isEnabled = enabled
+        binding.densityPresetMedium.isEnabled = enabled
+        binding.densityPresetLarge.isEnabled = enabled
+        binding.densityApplyButton.isEnabled = enabled
+        binding.densityResetButton.isEnabled = enabled
+        binding.densityAutoSwitch.isEnabled = ready
+        val note = when {
+            display == null -> getString(R.string.density_no_display)
+            !ready -> getString(R.string.shizuku_need)
+            else -> ""
+        }
+        binding.densityNote.text = note
+        binding.densityNote.visibility = if (note.isEmpty()) View.GONE else View.VISIBLE
+        if (display != null && display.displayId != sliderDisplayId) {
+            sliderDisplayId = display.displayId
+            val saved = DisplayPrefs.getSavedDensity(this, display.displayId)
+            binding.densitySlider.value = snapDpi(saved ?: 240).toFloat()
+            updateDensityValueLabel()
+        }
+        if (display == null) {
+            currentDensity = null
+            binding.densityCurrent.text =
+                getString(R.string.density_current, getString(R.string.density_unknown))
+        } else if (ready) {
+            refreshCurrentDensity()
+        } else {
+            binding.densityCurrent.text =
+                getString(R.string.density_current, getString(R.string.density_unknown))
+        }
+    }
+
+    private fun refreshCurrentDensity() {
+        val display = DisplayPrefs.resolveTargetDisplay(this) ?: return
+        val id = display.displayId
+        if (!shizukuReady()) return
+        try {
+            executor.execute {
+                val d = try {
+                    ExternalDisplayTweaks.getDensity(id)
+                } catch (e: Exception) {
+                    null
+                }
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    if (DisplayPrefs.resolveTargetDisplay(this)?.displayId != id) return@runOnUiThread
+                    currentDensity = d
+                    binding.densityCurrent.text = getString(
+                        R.string.density_current,
+                        if (d != null) getString(R.string.density_value, d)
+                        else getString(R.string.density_unknown)
+                    )
+                }
+            }
+        } catch (e: Exception) {
+        }
+    }
+
+    private fun setupAudioCard() {
+        binding.speakerSwitch.isChecked = DisplayPrefs.getForceSpeaker(this)
+        binding.speakerSwitch.setOnCheckedChangeListener { button, checked ->
+            if (!button.isPressed) return@setOnCheckedChangeListener
+            runPriv({ AudioRouting.forcePhoneSpeaker(this, checked) }) { r ->
+                log(
+                    getString(
+                        R.string.log_audio_speaker,
+                        getString(if (checked) R.string.on_word else R.string.off_word),
+                        r.message
+                    )
+                )
+                if (r.ok) {
+                    DisplayPrefs.setForceSpeaker(this, checked)
+                } else {
+                    binding.speakerSwitch.isChecked = !checked
+                    showPrivError(R.string.audio_error_title, r.message)
+                }
+            }
+        }
+        binding.audioSwitcherButton.setOnClickListener {
+            try {
+                val r = AudioRouting.openSystemOutputSwitcher(this)
+                log(getString(R.string.log_audio_switcher, r.message))
+                if (!r.ok) showPrivError(R.string.audio_error_title, r.message)
+            } catch (e: Exception) {
+                handleError(e, R.string.err_generic)
+            }
+        }
+        renderAudio()
+    }
+
+    private fun renderAudio() {
+        val ready = shizukuReady()
+        binding.speakerSwitch.isEnabled = ready
+        binding.audioNote.text = getString(R.string.shizuku_need)
+        binding.audioNote.visibility = if (ready) View.GONE else View.VISIBLE
+    }
+
+    private fun autoReapplyOnAdded() {
+        if (!shizukuReady()) return
+        val display = DisplayPrefs.resolveTargetDisplay(this)
+        if (display != null && DisplayPrefs.isAutoReapplyDensity(this)) {
+            val id = display.displayId
+            val dpi = DisplayPrefs.getSavedDensity(this, id)
+            if (dpi != null) {
+                runPriv({ ExternalDisplayTweaks.setDensity(id, dpi) }) { r ->
+                    log(getString(R.string.log_density_auto, id, dpi, r.message))
+                    refreshCurrentDensity()
+                }
+            }
+        }
+        if (DisplayPrefs.getForceSpeaker(this)) {
+            runPriv({ AudioRouting.forcePhoneSpeaker(this, true) }) { r ->
+                log(getString(R.string.log_audio_auto, r.message))
+            }
+        }
     }
 
     // ---- Duo mode ----
