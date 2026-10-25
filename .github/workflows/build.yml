@@ -42,5 +42,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cp app/build/outputs/apk/debug/app-debug.apk SecondScreen.apk
-          gh release view latest >/dev/null 2>&1 || gh release create latest --title "SecondScreen (dernière version)" --notes "APK debug compilé automatiquement depuis main."
-          gh release upload latest SecondScreen.apk --clobber
+          gh release delete latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create latest SecondScreen.apk \
+            --title "SecondScreen build #${{ github.run_number }} ($(date -u +'%d/%m/%Y %H:%M') UTC)" \
+            --notes "APK debug compilé automatiquement depuis main (commit ${GITHUB_SHA::7}). Télécharger SecondScreen.apk." \
+            --target "$GITHUB_SHA" --latest
