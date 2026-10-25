@@ -342,6 +342,20 @@ class MainActivity : AppCompatActivity() {
                 handleError(e, R.string.err_generic)
             }
         }
+        binding.openAppInfoButton.setOnClickListener {
+            try {
+                startActivity(
+                    Intent(
+                        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.parse("package:$packageName")
+                    )
+                )
+            } catch (e: Exception) {
+                handleError(e, R.string.err_generic)
+            }
+        }
+        binding.autoEnableButton.isEnabled = false
+        binding.autoEnableButton.setOnClickListener { autoEnableService() }
         binding.openTouchpadButton.setOnClickListener {
             val service = CursorAccessibilityService.instance
             if (service == null) {
@@ -377,6 +391,66 @@ class MainActivity : AppCompatActivity() {
             if (CursorAccessibilityService.instance != null) R.string.cursor_active
             else R.string.cursor_inactive
         )
+    }
+
+    private fun autoEnableService() {
+        val component = ComponentName(this, CursorAccessibilityService::class.java).flattenToString()
+        val pkg = packageName
+        binding.autoEnableButton.isEnabled = false
+        runPriv({
+            val r1 = ShizukuShell.exec("appops set $pkg ACCESS_RESTRICTED_SETTINGS allow")
+            runOnUiThread { log(getString(R.string.log_auto_step, "appops", r1.message.ifEmpty { "ok" })) }
+            val r2 = ShizukuShell.exec("settings get secure enabled_accessibility_services")
+            runOnUiThread { log(getString(R.string.log_auto_step, "get", r2.message.ifEmpty { "-" })) }
+            if (!r2.ok) {
+                r2
+            } else {
+                val list = r2.message.trim().split(':')
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() && it != "null" }
+                    .toMutableList()
+                if (!list.contains(component)) list.add(component)
+                val value = list.joinToString(":")
+                val r3 = ShizukuShell.exec("settings put secure enabled_accessibility_services '$value'")
+                runOnUiThread { log(getString(R.string.log_auto_step, "put services", r3.message.ifEmpty { "ok" })) }
+                if (!r3.ok) {
+                    r3
+                } else {
+                    val r4 = ShizukuShell.exec("settings put secure accessibility_enabled 1")
+                    runOnUiThread { log(getString(R.string.log_auto_step, "put enabled", r4.message.ifEmpty { "ok" })) }
+                    r4
+                }
+            }
+        }) { r ->
+            binding.autoEnableButton.isEnabled = shizukuReady()
+            handler.postDelayed({
+                if (isFinishing || isDestroyed) return@postDelayed
+                renderCursorStatus()
+                if (r.ok) {
+                    MaterialAlertDialogBuilder(this)
+                        .setTitle(R.string.auto_enable_title_ok)
+                        .setMessage(
+                            getString(R.string.auto_enable_ok) + "\n\n" +
+                                getString(
+                                    if (CursorAccessibilityService.instance != null) R.string.cursor_active
+                                    else R.string.cursor_inactive
+                                )
+                        )
+                        .setPositiveButton(R.string.close, null)
+                        .show()
+                } else {
+                    showPrivError(R.string.auto_enable_title_error, r.message)
+                }
+            }, 1500L)
+        }
+    }
+
+    private fun showShizukuGuide(prefix: String = "") {
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.shizuku_guide_title)
+            .setMessage(prefix + getString(R.string.shizuku_guide_text))
+            .setPositiveButton(R.string.close, null)
+            .show()
     }
 
     // ---- Shizuku / density / audio ----
@@ -415,8 +489,42 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupShizukuCard() {
         binding.shizukuAuthorizeButton.setOnClickListener {
+            val running = try { ShizukuShell.isRunning() } catch (e: Exception) { false }
+            if (!running) {
+                MaterialAlertDialogBuilder(this)
+                    .setTitle(R.string.shizuku_not_running_title)
+                    .setMessage(
+                        getString(R.string.shizuku_not_running_msg) +
+                            getString(R.string.shizuku_guide_text)
+                    )
+                    .setPositiveButton(R.string.close, null)
+                    .show()
+            } else {
+                try {
+                    ShizukuShell.requestPermission()
+                } catch (e: Exception) {
+                    handleError(e, R.string.err_generic)
+                }
+            }
+        }
+        binding.shizukuGuideButton.setOnClickListener { showShizukuGuide() }
+        binding.shizukuOpenButton.setOnClickListener {
             try {
-                ShizukuShell.requestPermission()
+                val i = packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api")
+                if (i == null) {
+                    showError(getString(R.string.shizuku_not_installed), null)
+                } else {
+                    startActivity(i)
+                }
+            } catch (e: Exception) {
+                handleError(e, R.string.err_generic)
+            }
+        }
+        binding.devOptionsButton.setOnClickListener {
+            try {
+                startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS))
+            } catch (e: ActivityNotFoundException) {
+                handleError(e, R.string.err_not_found)
             } catch (e: Exception) {
                 handleError(e, R.string.err_generic)
             }
@@ -471,6 +579,8 @@ class MainActivity : AppCompatActivity() {
         )
         binding.shizukuAuthorizeButton.isEnabled = running && !perm
         binding.shizukuInstallButton.isEnabled = !installed
+        binding.shizukuOpenButton.visibility = if (installed) View.VISIBLE else View.GONE
+        binding.autoEnableButton.isEnabled = perm
         renderDensity()
         renderAudio()
     }
